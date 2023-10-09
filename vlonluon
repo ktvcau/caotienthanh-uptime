@@ -1,0 +1,101 @@
+bot.on('message', async (msg) => {
+  const chatId = msg.chat.id;
+  
+  if (approvedUsers[chatId] || chatId.toString() === adminChatId) {
+    if (msg.text === '/uptime') {
+      bot.sendMessage(chatId, '❗ Được rồi hãy gửi cho tôi 1 liên kết bot của bạn.');
+    } else if (msg.text && msg.text.match(/^(http:\/\/|https:\/\/).*\.repl\.co\/?$/)) {
+      if (!storage[chatId]) storage[chatId] = [];
+      storage[chatId].push(msg.text);
+      bot.sendMessage(chatId, `⚡ Bắt đầu theo dõi ${msg.text}\n[ Sử dụng /noti để bật hoặc tắt thông báo ]`);
+      saveToFile();
+    } else if (msg.text.startsWith('/removed ')) {
+      const url = msg.text.split(' ')[1];
+      if (storage[chatId] && storage[chatId].includes(url)) {
+        const index = storage[chatId].indexOf(url);
+        storage[chatId].splice(index, 1);
+        saveToFile();
+        bot.sendMessage(chatId, `🗑️ Đã loại bỏ liên kết : ${url}`);
+      } else {
+        bot.sendMessage(chatId, '❓ Liên kết này không được tìm thấy trong danh sách theo dõi của bạn.');
+      }
+    } else if (msg.text === '/noti') {
+      notificationPreferences[chatId] = !notificationPreferences[chatId];
+
+      fs.writeFileSync('notificationSettings.json', JSON.stringify(notificationPreferences));
+
+      const notificationStatus = notificationPreferences[chatId] ? 'bật\nNếu bạn muốn tắt thì dùng lệnh /noti thêm 1 lần nữa.' : 'tắt\nNếu bạn muốn bật thì dùng lệnh /noti thêm 1 lần nữa.';
+      bot.sendMessage(chatId, `🔔 Thông báo của bạn đang ở trạng thái là ${notificationStatus}`);
+    }
+  } else {
+    bot.sendMessage(chatId, '🔐 Bạn không được phép sử dụng bot này.\n🔈Nhấn nút duyệt sẽ gửi tới Admin Bot về quyền sử dụng bot.', {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: 'Duyệt',
+              callback_data: 'request_approval'
+            }
+          ]
+        ]
+      }
+    });
+  }
+});
+
+bot.on('callback_query', (query) => {
+  const chatId = query.message.chat.id;
+  
+  if (query.data === 'request_approval') {
+    const firstName = query.message.chat.first_name || "";
+    const lastName = query.message.chat.last_name || "";  
+    const fullName = `${firstName} ${lastName}`.trim();
+    bot.sendMessage(chatId, '⚙️ Yêu cầu của bạn đã được gửi tới Admin Bot : @ktvcau\n🟢 Để được duyệt thì hãy liên hệ Admin Bot!');
+    const userChatId = query.data.split('_')[1];
+    bot.sendMessage(adminChatId, `🗣️ Tên của người dùng này : ${fullName}\n🆔 : ${chatId} có yêu cầu cần phê duyệt để sử dụng bot.`, {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: 'Duyệt',
+              callback_data: `approve_${chatId}`
+            },
+            {
+              text: 'Từ chối',
+              callback_data: `deny_${chatId}`
+            }
+          ]
+        ]
+      }
+    });
+  } else if (query.data.startsWith('approve_')) {
+    const firstName = query.message.chat.first_name || "";
+    const lastName = query.message.chat.last_name || "";  
+    const fullName = `${firstName} ${lastName}`.trim();
+    const userChatId = query.data.split('_')[1];
+    approvedUsers[userChatId] = true;
+    fs.writeFileSync('approvedUsers.json', JSON.stringify(approvedUsers));
+    bot.sendMessage(userChatId, '✅ Yêu cầu của bạn đã được Admin Bot chấp thuận.\nBây giờ bạn có thể sử dụng bot bình thường!');
+    bot.sendMessage(adminChatId, `✅ Đã chấp thuận yêu người dùng bot\n🗣️ Người phê duyệt | Admin Bot : ${fullName}\n🆔 Người dùng được duyệt : ${userChatId}`);                
+  } else if (query.data.startsWith('deny_')) {
+    const firstName = query.message.chat.first_name || "";
+    const lastName = query.message.chat.last_name || "";  
+    const fullName = `${firstName} ${lastName}`.trim();
+    const userChatId = query.data.split('_')[1];
+    fs.writeFileSync('blockedUsers.json', JSON.stringify(approvedUsers));
+    bot.sendMessage(userChatId, '🚫 Yêu cầu của bạn đã bị Admin Bot từ chối.\nLí do : Admin Bot cảm thấy bạn có ý định xấu với bot.');
+    bot.sendMessage(adminChatId, `🚫 Đã từ chối yêu người dùng bot\nAdmin Bot : ${fullName}\n🆔 Người dùng bị từ chối : ${userChatId}`); 
+  }
+});
+
+setInterval(async () => {
+  for (const [chatId, urls] of Object.entries(storage)) {
+    for (const url of urls) {
+      const isUp = await checkURL(url);
+      
+      if (notificationPreferences[chatId]) {
+        bot.sendMessage(chatId, `🌐 Đang theo dõi liên kết trên server riêng của bot\n⏱️ Hiện tại liên kết : ${url} có trạng thái ${isUp ? 'ổn định' : 'xảy ra lỗi\nHãy kiểm tra lại liên kết và bot của bạn.'}`);
+      }
+    }
+  }
+}, 3 * 60 * 1000);
